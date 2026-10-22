@@ -1,0 +1,451 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>SongSplitter</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='8' fill='%237c5cff'/><path d='M7 20v-8M12 24V8M17 18v-4M22 22V10M27 17v-2' stroke='white' stroke-width='2.6' stroke-linecap='round'/></svg>">
+<style>
+  :root {
+    --bg: #0e0e14; --panel: #17171f; --panel2: #1f1f2a; --line: #2a2a38;
+    --text: #ececf3; --muted: #8e8ea3; --accent: #7c5cff; --accent2: #a48bff;
+    --danger: #ff5c6c; --radius: 14px;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; background: var(--bg); color: var(--text);
+    font: 15px/1.5 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+  button { font: inherit; color: inherit; cursor: pointer; }
+  .wrap { max-width: 980px; margin: 0 auto; padding: 28px 16px 60px; }
+  header { display: flex; align-items: center; gap: 12px; margin-bottom: 28px; }
+  header .logo { width: 38px; height: 38px; border-radius: 10px; background: var(--accent);
+    display: grid; place-items: center; }
+  header h1 { font-size: 22px; margin: 0; letter-spacing: -.3px; }
+  header p { margin: 0; color: var(--muted); font-size: 13px; }
+  header .spacer { flex: 1; }
+  .link-btn { background: none; border: 1px solid var(--line); border-radius: 10px; padding: 7px 14px;
+    color: var(--muted); }
+  .link-btn:hover { color: var(--text); border-color: #3c3c50; }
+
+  .card { background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); padding: 22px; }
+  .drop { border: 2px dashed #34344a; border-radius: var(--radius); padding: 44px 20px; text-align: center;
+    transition: .15s; cursor: pointer; }
+  .drop:hover, .drop.over { border-color: var(--accent); background: rgba(124,92,255,.06); }
+  .drop .big { font-size: 18px; font-weight: 600; margin: 10px 0 4px; }
+  .drop .small { color: var(--muted); font-size: 13px; }
+  .drop.has-file .big { color: var(--accent2); }
+
+  .section-label { font-size: 12px; text-transform: uppercase; letter-spacing: .08em; color: var(--muted);
+    margin: 22px 0 10px; }
+  .modes { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 10px; }
+  .mode { text-align: left; background: var(--panel2); border: 1.5px solid var(--line); border-radius: 12px;
+    padding: 12px 14px; }
+  .mode b { display: block; font-size: 15px; }
+  .mode span { color: var(--muted); font-size: 12.5px; }
+  .mode.sel { border-color: var(--accent); background: rgba(124,92,255,.12); }
+  .row { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; margin-top: 22px; }
+  .seg { display: inline-flex; background: var(--panel2); border: 1px solid var(--line); border-radius: 10px; padding: 3px; }
+  .seg button { background: none; border: 0; padding: 6px 14px; border-radius: 7px; color: var(--muted); }
+  .seg button.sel { background: var(--accent); color: white; }
+  .primary { background: var(--accent); border: 0; border-radius: 11px; padding: 11px 26px; font-weight: 600;
+    color: white; margin-left: auto; }
+  .primary:hover { background: #8d70ff; }
+  .primary:disabled { opacity: .4; cursor: not-allowed; }
+
+  .progress-card { text-align: center; padding: 40px 22px; }
+  .progress-card h2 { margin: 0 0 4px; font-size: 19px; word-break: break-word; }
+  .bar { height: 10px; background: var(--panel2); border-radius: 99px; overflow: hidden; margin: 22px auto 10px; max-width: 520px; }
+  .bar > div { height: 100%; width: 0; background: linear-gradient(90deg, var(--accent), #c56cff); transition: width .4s; }
+  .muted { color: var(--muted); font-size: 13.5px; }
+  .err { color: var(--danger); }
+
+  /* mixer */
+  .mixer-head { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; margin-bottom: 18px; }
+  .mixer-head h2 { margin: 0; font-size: 19px; flex: 1; min-width: 200px; word-break: break-word; }
+  .transport { display: flex; align-items: center; gap: 14px; margin-bottom: 16px; }
+  .play { width: 52px; height: 52px; border-radius: 50%; border: 0; background: var(--accent);
+    display: grid; place-items: center; flex: none; }
+  .play:disabled { opacity: .4; }
+  .time { font-variant-numeric: tabular-nums; color: var(--muted); font-size: 13px; min-width: 92px; }
+  input[type=range] { accent-color: var(--accent); }
+  .seek { flex: 1; min-width: 0; }
+  .stem { display: grid; grid-template-columns: 130px 1fr auto; gap: 14px; align-items: center;
+    padding: 10px 0; border-top: 1px solid var(--line); }
+  .stem-name { display: flex; align-items: center; gap: 9px; font-weight: 600; text-transform: capitalize; }
+  .dot { width: 10px; height: 10px; border-radius: 50%; flex: none; }
+  .wave { position: relative; height: 54px; cursor: pointer; min-width: 0; }
+  .wave canvas { position: absolute; left: 0; top: 0; height: 100%; }
+  .wave .played { position: absolute; left: 0; top: 0; bottom: 0; overflow: hidden; width: 0; }
+  .wave .head { position: absolute; top: -2px; bottom: -2px; width: 2px; background: white; left: 0; opacity: .85; }
+  .stem.off .wave { opacity: .28; }
+  .ctrls { display: flex; align-items: center; gap: 6px; }
+  .ctrls input { width: 84px; }
+  .tog { width: 30px; height: 30px; border-radius: 8px; border: 1px solid var(--line); background: var(--panel2);
+    font-size: 12px; font-weight: 700; color: var(--muted); }
+  .tog.on-m { background: var(--danger); color: white; border-color: var(--danger); }
+  .tog.on-s { background: #ffb020; color: #111; border-color: #ffb020; }
+  .icon-btn { width: 30px; height: 30px; border-radius: 8px; border: 1px solid var(--line); background: var(--panel2);
+    display: grid; place-items: center; color: var(--muted); text-decoration: none; }
+  .icon-btn:hover { color: var(--text); }
+
+  .history { margin-top: 30px; }
+  .hist-item { display: flex; align-items: center; gap: 12px; padding: 11px 14px; border-radius: 11px;
+    background: var(--panel); border: 1px solid var(--line); margin-bottom: 8px; cursor: pointer; }
+  .hist-item:hover { border-color: #3c3c50; }
+  .hist-item .t { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .badge { font-size: 11.5px; padding: 2px 8px; border-radius: 99px; background: var(--panel2); color: var(--muted); white-space: nowrap; }
+  .hidden { display: none !important; }
+
+  @media (max-width: 640px) {
+    .stem { grid-template-columns: 1fr auto; }
+    .stem .wave { grid-column: 1 / -1; grid-row: 2; }
+    .primary { margin-left: 0; width: 100%; }
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <div class="logo"><svg width="22" height="22" viewBox="0 0 32 32"><path d="M5 20v-8M10.5 25V7M16 19v-6M21.5 23V9M27 17v-2" stroke="white" stroke-width="3" stroke-linecap="round"/></svg></div>
+    <div><h1>SongSplitter</h1><p>Split any song into vocals, drums, bass &amp; more with AI</p></div>
+    <div class="spacer"></div>
+    <span class="badge hidden" id="device" title="Hardware used for AI separation"></span>
+    <button class="link-btn hidden" id="newBtn">+ New song</button>
+  </header>
+
+  <!-- upload -->
+  <section id="uploadView">
+    <div class="card">
+      <div class="drop" id="drop">
+        <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="#7c5cff" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/></svg>
+        <div class="big" id="dropText">Drop a song here or click to browse</div>
+        <div class="small">MP3, WAV, FLAC, M4A, OGG, or even a video file</div>
+        <input type="file" id="fileInput" accept="audio/*,video/*" hidden>
+      </div>
+      <div class="section-label">Separation</div>
+      <div class="modes" id="modes"></div>
+      <div class="row">
+        <span class="muted">Output</span>
+        <div class="seg" id="fmt"><button data-v="mp3" class="sel">MP3</button><button data-v="wav">WAV</button></div>
+        <button class="primary" id="splitBtn" disabled>Split song</button>
+      </div>
+    </div>
+    <div class="history" id="history"></div>
+  </section>
+
+  <!-- progress -->
+  <section id="progressView" class="hidden">
+    <div class="card progress-card">
+      <h2 id="pTitle"></h2>
+      <div class="muted" id="pMode"></div>
+      <div class="bar"><div id="pBar"></div></div>
+      <div class="muted" id="pMsg"></div>
+    </div>
+  </section>
+
+  <!-- mixer -->
+  <section id="mixerView" class="hidden">
+    <div class="card">
+      <div class="mixer-head">
+        <h2 id="mTitle"></h2>
+        <a class="primary" id="zipBtn" style="text-decoration:none;margin-left:0">Download all (ZIP)</a>
+      </div>
+      <div class="transport">
+        <button class="play" id="playBtn" disabled title="Play / pause (Space)"></button>
+        <input type="range" class="seek" id="seek" min="0" max="1000" value="0">
+        <span class="time" id="time">0:00 / 0:00</span>
+      </div>
+      <div id="stems"></div>
+      <div class="muted" id="mInfo" style="margin-top:14px"></div>
+    </div>
+  </section>
+</div>
+
+<script>
+const $ = s => document.querySelector(s);
+const COLORS = { vocals: '#ff5c8a', drums: '#ffb020', bass: '#4cc9f0', guitar: '#7bd389',
+  piano: '#b388ff', other: '#9b9bb5', instrumental: '#4cc9f0' };
+const PLAY = '<svg width="22" height="22" viewBox="0 0 24 24" fill="white"><path d="M7 4.5v15l13-7.5z"/></svg>';
+const PAUSE = '<svg width="22" height="22" viewBox="0 0 24 24" fill="white"><rect x="6" y="4.5" width="4" height="15" rx="1"/><rect x="14" y="4.5" width="4" height="15" rx="1"/></svg>';
+const DL = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 4v12M6 11l6 6 6-6M5 20h14"/></svg>';
+const fmtTime = s => { s = Math.max(0, s || 0); return `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, '0')}`; };
+const esc = s => String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+
+let file = null, mode = '4stems', format = 'mp3', modeList = [], pollTimer = null;
+
+function show(view) {
+  for (const v of ['uploadView', 'progressView', 'mixerView']) $('#' + v).classList.toggle('hidden', v !== view);
+  $('#newBtn').classList.toggle('hidden', view === 'uploadView');
+  if (view !== 'mixerView') mixer.stop();
+}
+
+/* ---------- upload ---------- */
+async function initUpload() {
+  modeList = await (await fetch('/api/modes')).json();
+  $('#modes').innerHTML = modeList.map(m =>
+    `<button class="mode ${m.id === mode ? 'sel' : ''}" data-id="${m.id}"><b>${esc(m.label)}</b><span>${esc(m.description)}</span></button>`).join('');
+  $('#modes').onclick = e => {
+    const b = e.target.closest('.mode'); if (!b) return;
+    mode = b.dataset.id;
+    document.querySelectorAll('.mode').forEach(x => x.classList.toggle('sel', x === b));
+  };
+  $('#fmt').onclick = e => {
+    const b = e.target.closest('button'); if (!b) return;
+    format = b.dataset.v;
+    document.querySelectorAll('#fmt button').forEach(x => x.classList.toggle('sel', x === b));
+  };
+  const drop = $('#drop'), input = $('#fileInput');
+  drop.onclick = () => input.click();
+  input.onchange = () => input.files[0] && pickFile(input.files[0]);
+  drop.ondragover = e => { e.preventDefault(); drop.classList.add('over'); };
+  drop.ondragleave = () => drop.classList.remove('over');
+  drop.ondrop = e => { e.preventDefault(); drop.classList.remove('over'); e.dataTransfer.files[0] && pickFile(e.dataTransfer.files[0]); };
+  $('#splitBtn').onclick = upload;
+  $('#newBtn').onclick = () => { location.hash = ''; };
+}
+
+function pickFile(f) {
+  file = f;
+  $('#drop').classList.add('has-file');
+  $('#dropText').textContent = f.name;
+  $('#splitBtn').disabled = false;
+}
+
+async function upload() {
+  if (!file) return;
+  const btn = $('#splitBtn');
+  btn.disabled = true; btn.textContent = 'Uploading...';
+  const fd = new FormData();
+  fd.append('file', file); fd.append('mode', mode); fd.append('format', format);
+  try {
+    const res = await fetch('/api/split', { method: 'POST', body: fd });
+    if (!res.ok) throw new Error((await res.json()).detail || res.statusText);
+    const job = await res.json();
+    file = null; $('#fileInput').value = '';
+    $('#drop').classList.remove('has-file'); $('#dropText').textContent = 'Drop a song here or click to browse';
+    location.hash = 'job=' + job.id;
+  } catch (e) {
+    alert('Upload failed: ' + e.message);
+    btn.disabled = false;
+  } finally {
+    btn.textContent = 'Split song';
+  }
+}
+
+async function loadHistory() {
+  const list = await (await fetch('/api/jobs')).json();
+  const el = $('#history');
+  if (!list.length) { el.innerHTML = ''; return; }
+  const label = id => (modeList.find(m => m.id === id) || {}).label || id;
+  el.innerHTML = '<div class="section-label">Your songs</div>' + list.map(j => `
+    <div class="hist-item" data-id="${j.id}">
+      <span class="dot" style="background:${j.status === 'done' ? '#7bd389' : j.status === 'error' ? 'var(--danger)' : '#ffb020'}"></span>
+      <span class="t">${esc(j.name)}</span>
+      <span class="badge">${esc(label(j.mode))} · ${j.format.toUpperCase()}</span>
+      <span class="badge">${j.status === 'done' ? fmtTime(j.duration) : j.status}</span>
+      ${j.status === 'done' || j.status === 'error' ? `<button class="icon-btn" data-del="${j.id}" title="Delete">✕</button>` : ''}
+    </div>`).join('');
+  el.onclick = async e => {
+    const del = e.target.closest('[data-del]');
+    if (del) {
+      e.stopPropagation();
+      if (!confirm('Delete this song and its stems?')) return;
+      await fetch('/api/jobs/' + del.dataset.del, { method: 'DELETE' });
+      return loadHistory();
+    }
+    const item = e.target.closest('.hist-item');
+    if (item) location.hash = 'job=' + item.dataset.id;
+  };
+}
+
+/* ---------- job progress ---------- */
+async function openJob(id) {
+  clearTimeout(pollTimer);
+  const res = await fetch('/api/jobs/' + id);
+  if (!res.ok) { location.hash = ''; return; }
+  const job = await res.json();
+  if (location.hash !== '#job=' + id) return; // user navigated away
+  if (job.status === 'done') { show('mixerView'); mixer.load(job); return; }
+  show('progressView');
+  $('#pTitle').textContent = job.name;
+  $('#pMode').textContent = (modeList.find(m => m.id === job.mode) || {}).description || '';
+  $('#pBar').style.width = (job.progress * 100).toFixed(1) + '%';
+  $('#pMsg').classList.toggle('err', job.status === 'error');
+  $('#pMsg').textContent = job.status === 'error' ? 'Error: ' + job.error
+    : job.status === 'queued' ? (engineReady ? `Waiting in queue (position ${job.queue_position})...`
+      : 'Warming up the AI engine (only on startup)...') : job.message;
+  if (job.status !== 'error') pollTimer = setTimeout(() => openJob(id), 700);
+}
+
+/* ---------- mixer ---------- */
+const mixer = {
+  tracks: [], playing: false, raf: 0, duration: 0, dragging: false,
+
+  load(job) {
+    this.stop();
+    this.job = job;
+    this.duration = job.duration;
+    $('#mTitle').textContent = job.name;
+    $('#zipBtn').href = `/api/jobs/${job.id}/zip`;
+    $('#mInfo').textContent = `${(modeList.find(m => m.id === job.mode) || {}).description || ''} · ${job.format.toUpperCase()}`
+      + (job.elapsed ? ` · processed in ${fmtTime(job.elapsed)}` : '');
+    const box = $('#stems');
+    box.innerHTML = '';
+    let ready = 0;
+    this.tracks = job.stems.map(s => {
+      const color = COLORS[s.name] || '#9b9bb5';
+      const row = document.createElement('div');
+      row.className = 'stem';
+      row.innerHTML = `
+        <div class="stem-name"><span class="dot" style="background:${color}"></span>${esc(s.name)}</div>
+        <div class="wave"><canvas class="base"></canvas><div class="played"><canvas class="lit"></canvas></div><div class="head"></div></div>
+        <div class="ctrls">
+          <input type="range" min="0" max="1" step="0.01" value="1" title="Volume">
+          <button class="tog" data-t="m" title="Mute">M</button>
+          <button class="tog" data-t="s" title="Solo">S</button>
+          <a class="icon-btn" title="Download ${esc(s.name)}" href="/api/jobs/${job.id}/stems/${encodeURIComponent(s.file)}?download=true">${DL}</a>
+        </div>`;
+      box.appendChild(row);
+      const audio = new Audio(`/api/jobs/${job.id}/stems/${encodeURIComponent(s.file)}`);
+      audio.preload = 'auto';
+      const t = { stem: s, color, row, audio, mute: false, solo: false, volume: 1 };
+      audio.addEventListener('canplaythrough', () => { if (++ready === job.stems.length) $('#playBtn').disabled = false; }, { once: true });
+      audio.addEventListener('loadedmetadata', () => { if (audio.duration && isFinite(audio.duration)) this.duration = audio.duration; }, { once: true });
+      audio.addEventListener('ended', () => { if (t === this.tracks[0]) this.pause(true); });
+      row.querySelector('input').oninput = e => { t.volume = +e.target.value; this.applyGains(); };
+      row.querySelectorAll('.tog').forEach(b => b.onclick = () => {
+        if (b.dataset.t === 'm') t.mute = !t.mute; else t.solo = !t.solo;
+        this.applyGains();
+      });
+      row.querySelector('.wave').onclick = e => {
+        const r = e.currentTarget.getBoundingClientRect();
+        this.seek((e.clientX - r.left) / r.width * this.duration);
+      };
+      return t;
+    });
+    this.drawWaves();
+    this.applyGains();
+    this.update();
+    $('#playBtn').innerHTML = PLAY;
+    $('#playBtn').disabled = true;
+  },
+
+  drawWaves() {
+    for (const t of this.tracks) {
+      const wave = t.row.querySelector('.wave');
+      const w = wave.clientWidth, h = wave.clientHeight, dpr = devicePixelRatio || 1;
+      for (const [sel, alpha] of [['.base', .35], ['.lit', 1]]) {
+        const c = wave.querySelector(sel);
+        c.width = w * dpr; c.height = h * dpr; c.style.width = w + 'px';
+        const ctx = c.getContext('2d');
+        ctx.scale(dpr, dpr);
+        ctx.fillStyle = t.color; ctx.globalAlpha = alpha;
+        const p = t.stem.peaks, n = p.length, bw = w / n;
+        const max = Math.max(0.05, ...p);
+        for (let i = 0; i < n; i++) {
+          const bh = Math.max(1, (p[i] / max) * (h - 4));
+          ctx.fillRect(i * bw, (h - bh) / 2, Math.max(1, bw - .5), bh);
+        }
+      }
+    }
+  },
+
+  applyGains() {
+    const anySolo = this.tracks.some(t => t.solo);
+    for (const t of this.tracks) {
+      const on = anySolo ? t.solo : !t.mute;
+      t.audio.volume = t.volume;
+      t.audio.muted = !on;
+      t.row.classList.toggle('off', !on);
+      t.row.querySelector('[data-t=m]').classList.toggle('on-m', t.mute);
+      t.row.querySelector('[data-t=s]').classList.toggle('on-s', t.solo);
+    }
+  },
+
+  get time() { return this.tracks[0] ? this.tracks[0].audio.currentTime : 0; },
+
+  async play() {
+    if (!this.tracks.length) return;
+    const t0 = this.time >= this.duration - 0.05 ? 0 : this.time;
+    for (const t of this.tracks) t.audio.currentTime = t0;
+    await Promise.all(this.tracks.map(t => t.audio.play().catch(() => {})));
+    this.playing = true;
+    $('#playBtn').innerHTML = PAUSE;
+    this.loop();
+  },
+
+  pause(ended) {
+    for (const t of this.tracks) t.audio.pause();
+    this.playing = false;
+    cancelAnimationFrame(this.raf);
+    $('#playBtn').innerHTML = PLAY;
+    if (ended === true) this.seek(0);
+    this.update();
+  },
+
+  stop() {
+    this.pause();
+    for (const t of this.tracks) { t.audio.removeAttribute('src'); t.audio.load(); }
+    this.tracks = [];
+  },
+
+  seek(sec) {
+    sec = Math.min(Math.max(0, sec), this.duration);
+    for (const t of this.tracks) t.audio.currentTime = sec;
+    this.update(sec);
+  },
+
+  loop() {
+    // keep followers locked to the first track
+    const master = this.tracks[0].audio.currentTime;
+    for (const t of this.tracks.slice(1))
+      if (Math.abs(t.audio.currentTime - master) > 0.06) t.audio.currentTime = master;
+    this.update();
+    if (this.playing) this.raf = requestAnimationFrame(() => this.loop());
+  },
+
+  update(at) {
+    const cur = at ?? this.time, frac = this.duration ? cur / this.duration : 0;
+    if (!this.dragging) $('#seek').value = Math.round(frac * 1000);
+    $('#time').textContent = `${fmtTime(cur)} / ${fmtTime(this.duration)}`;
+    for (const t of this.tracks) {
+      t.row.querySelector('.played').style.width = frac * 100 + '%';
+      t.row.querySelector('.head').style.left = `calc(${frac * 100}% - 1px)`;
+    }
+  },
+};
+
+$('#playBtn').onclick = () => mixer.playing ? mixer.pause() : mixer.play();
+$('#seek').oninput = e => { mixer.dragging = true; mixer.seek(e.target.value / 1000 * mixer.duration); };
+$('#seek').onchange = () => { mixer.dragging = false; };
+addEventListener('resize', () => mixer.tracks.length && mixer.drawWaves());
+addEventListener('keydown', e => {
+  if (e.code === 'Space' && !$('#mixerView').classList.contains('hidden') && e.target.tagName !== 'INPUT') {
+    e.preventDefault(); $('#playBtn').click();
+  }
+});
+
+/* ---------- device badge ---------- */
+let engineReady = false;
+async function pollInfo() {
+  try {
+    const info = await (await fetch('/api/info')).json();
+    engineReady = info.ready;
+    const el = $('#device');
+    el.classList.remove('hidden');
+    el.textContent = (info.gpu ? '⚡ ' : '') + info.device + (info.ready ? '' : ' · warming up...');
+    if (!info.ready) setTimeout(pollInfo, 1500);
+  } catch { setTimeout(pollInfo, 3000); }
+}
+pollInfo();
+
+/* ---------- routing ---------- */
+function route() {
+  const m = location.hash.match(/job=([\w]+)/);
+  if (m) openJob(m[1]);
+  else { clearTimeout(pollTimer); show('uploadView'); $('#splitBtn').disabled = !file; loadHistory(); }
+}
+addEventListener('hashchange', route);
+initUpload().then(route);
+</script>
+</body>
+</html>

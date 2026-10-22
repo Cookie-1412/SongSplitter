@@ -1,0 +1,8 @@
+.venv/
+.venv-gpu/
+__pycache__/
+*.py[cod]
+.env
+
+# Uploaded songs and generated stems
+jobs/

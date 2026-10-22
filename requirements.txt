@@ -1,0 +1,13 @@
+# PyTorch: install first. CPU build:
+#   pip install torch torchaudio --index-url https://download.pytorch.org/whl/cpu
+# AMD RX 7800 XT (ROCm, Windows):
+#   pip install --index-url https://stable.repo.amd.com/rocm/whl-next/ "torch[device-gfx1101]" torchaudio
+# NVIDIA: see https://pytorch.org/get-started/locally/
+torch
+torchaudio
+demucs
+fastapi
+uvicorn[standard]
+python-multipart
+soundfile
+imageio-ffmpeg
