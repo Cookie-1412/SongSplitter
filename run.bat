@@ -19,6 +19,10 @@ if not exist "%PY%" (
     echo [SongSplitter] See README.md to enable GPU acceleration.
 )
 
+rem  Keep yt-dlp current: sites like YouTube change often and old versions stop working.
+echo [SongSplitter] Checking for downloader updates...
+"%PY%" -m pip install -U "yt-dlp[default]" -q --disable-pip-version-check >nul 2>&1
+
 "%PY%" app.py
 pause
 exit /b 0

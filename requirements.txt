@@ -11,3 +11,4 @@ uvicorn[standard]
 python-multipart
 soundfile
 imageio-ffmpeg
+yt-dlp[default]

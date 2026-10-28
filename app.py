@@ -22,12 +22,13 @@ from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 
+import downloader
 import separator
 
 ROOT = Path(__file__).parent
-JOBS_DIR = ROOT / "jobs"
-JOBS_DIR.mkdir(exist_ok=True)
-HOST, PORT = "127.0.0.1", 8765
+JOBS_DIR = Path(os.environ.get("SONGSPLITTER_JOBS_DIR", ROOT / "jobs"))
+JOBS_DIR.mkdir(parents=True, exist_ok=True)
+HOST, PORT = "127.0.0.1", int(os.environ.get("SONGSPLITTER_PORT", 8765))
 
 app = FastAPI(title="SongSplitter")
 jobs = {}
@@ -40,7 +41,9 @@ def save_job(job):
 
 
 def load_jobs():
-    for meta in JOBS_DIR.glob("*/job.json"):
+    for leftover in JOBS_DIR.glob(".deleting-*"):
+        shutil.rmtree(leftover, ignore_errors=True)
+    for meta in JOBS_DIR.glob("[!.]*/job.json"):
         try:
             job = json.loads(meta.read_text())
         except (OSError, ValueError):
@@ -75,9 +78,18 @@ def worker():
         update(job, status="running", progress=0.0, message="Starting...")
         started = time.time()
         try:
+            # Link jobs: download first (0-10% of the bar), then separate (10-100%).
+            span = (0.0, 1.0)
+            if not job["input"]:
+                got = downloader.download(
+                    job["source"], job_dir,
+                    on_progress=lambda f, m: update(job, progress=round(0.1 * f, 3), message=m))
+                update(job, input=got["file"], name=got["title"])
+                save_job(job)
+                span = (0.1, 0.9)
             result = separator.separate(
                 job_dir / job["input"], job_dir, job["mode"], job["format"],
-                on_progress=lambda f, m: update(job, progress=round(f, 3), message=m),
+                on_progress=lambda f, m: update(job, progress=round(span[0] + span[1] * f, 3), message=m),
             )
             update(job, status="done", progress=1.0, message="Done",
                    stems=result["stems"], duration=result["duration"],
@@ -114,29 +126,50 @@ def modes():
     return [{"id": k, "label": v[1], "description": v[2]} for k, v in separator.MODES.items()]
 
 
-@app.post("/api/split")
-async def split(file: UploadFile = File(...), mode: str = Form("4stems"),
-                format: str = Form("mp3")):
+def check_options(mode, format):
     if mode not in separator.MODES:
         raise HTTPException(400, "Unknown mode")
     if format not in ("mp3", "wav"):
         raise HTTPException(400, "Format must be mp3 or wav")
+
+
+def new_job(name, mode, format, input_name=None, source=None):
     job_id = uuid.uuid4().hex[:12]
-    job_dir = JOBS_DIR / job_id
-    job_dir.mkdir()
-    ext = Path(file.filename or "song").suffix.lower()[:8] or ".audio"
-    input_name = "input" + re.sub(r"[^.a-z0-9]", "", ext)
-    with open(job_dir / input_name, "wb") as f:
-        shutil.copyfileobj(file.file, f)
+    (JOBS_DIR / job_id).mkdir()
     job = {
-        "id": job_id, "name": Path(file.filename or "song").stem, "input": input_name,
+        "id": job_id, "name": name, "input": input_name, "source": source,
         "mode": mode, "format": format, "status": "queued", "progress": 0.0,
         "message": "Waiting in queue...", "created": time.time(), "stems": [],
     }
-    jobs[job_id] = job
+    return job
+
+
+def enqueue(job):
+    jobs[job["id"]] = job
     save_job(job)
-    work_queue.put(job_id)
+    work_queue.put(job["id"])
     return public(job)
+
+
+@app.post("/api/split")
+async def split(file: UploadFile = File(...), mode: str = Form("4stems"),
+                format: str = Form("mp3")):
+    check_options(mode, format)
+    ext = Path(file.filename or "song").suffix.lower()[:8] or ".audio"
+    input_name = "input" + re.sub(r"[^.a-z0-9]", "", ext)
+    job = new_job(Path(file.filename or "song").stem, mode, format, input_name=input_name)
+    with open(JOBS_DIR / job["id"] / input_name, "wb") as f:
+        shutil.copyfileobj(file.file, f)
+    return enqueue(job)
+
+
+@app.post("/api/split_url")
+def split_url(url: str = Form(...), mode: str = Form("4stems"), format: str = Form("mp3")):
+    check_options(mode, format)
+    url = url.strip()
+    if not downloader.is_url(url):
+        raise HTTPException(400, "Please paste a full link starting with http:// or https://")
+    return enqueue(new_job(url, mode, format, source=url))
 
 
 @app.get("/api/jobs")
@@ -154,8 +187,17 @@ def delete_job(job_id: str):
     job = get_job(job_id)
     if job["status"] in ("queued", "running"):
         raise HTTPException(409, "Job is still processing")
+    # Rename first: on Windows this fails while any file inside is open, so a
+    # delete either removes the whole job or nothing (never a half-deleted job).
+    trash = JOBS_DIR / f".deleting-{job_id}"
+    try:
+        (JOBS_DIR / job_id).rename(trash)
+    except FileNotFoundError:
+        pass
+    except OSError:
+        raise HTTPException(409, "Some files of this song are in use. Close any player using them and try again.")
     jobs.pop(job_id, None)
-    shutil.rmtree(JOBS_DIR / job_id, ignore_errors=True)
+    shutil.rmtree(trash, ignore_errors=True)
     return {"ok": True}
 
 
@@ -183,10 +225,30 @@ def stems_zip(job_id: str):
         "Content-Disposition": f"attachment; filename=\"stems.zip\"; filename*=UTF-8''{name}"})
 
 
+@app.middleware("http")
+async def no_stale_ui(request, call_next):
+    # Make the browser re-check the page on every load so app updates show up.
+    response = await call_next(request)
+    if not request.url.path.startswith("/api/"):
+        response.headers["Cache-Control"] = "no-cache"
+    return response
+
+
 app.mount("/", StaticFiles(directory=ROOT / "static", html=True), name="static")
 
 
+def port_in_use():
+    import socket
+    with socket.socket() as s:
+        return s.connect_ex((HOST, PORT)) == 0
+
+
 if __name__ == "__main__":
+    if port_in_use():
+        print(f"\n  SongSplitter is already running at http://{HOST}:{PORT}")
+        print("  Close the other SongSplitter window first, then start this again,")
+        print("  otherwise you keep using the old version.\n")
+        raise SystemExit(1)
     load_jobs()
     threading.Thread(target=worker, daemon=True).start()
     url = f"http://{HOST}:{PORT}"

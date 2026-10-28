@@ -15,6 +15,20 @@ in your browser.
 
 The first split with each mode also downloads that AI model (~80 MB, or ~320 MB for HQ).
 
+## Split from a link
+
+Paste a link (YouTube, SoundCloud, Bandcamp, Vimeo or any of the
+[1,000+ sites yt-dlp supports](https://github.com/yt-dlp/yt-dlp/blob/master/supportedsites.md))
+into the link box, or press Ctrl+V anywhere on the page. Only the audio track is downloaded,
+and the video's title becomes the song name.
+
+- If the link is a playlist, only the first item is used. Live streams and anything over 30 minutes are rejected.
+- Age-restricted or private videos can't be downloaded because they need a signed-in account.
+- `run.bat` updates yt-dlp on every launch, because sites like YouTube change often.
+  If links stop working, close the app and start it again.
+- YouTube needs a JavaScript runtime for full format support. The app uses Node.js, Deno or Bun if one is installed.
+- Only download content you have the rights to use.
+
 ## Modes
 
 | Mode        | Stems                                     | Model          |
@@ -45,7 +59,7 @@ When the server starts, it warms up the GPU (tens of seconds) so the first song 
   ```
   python -m venv .venv-gpu
   .venv-gpu\Scripts\python.exe -m pip install --index-url https://stable.repo.amd.com/rocm/whl-next/ "torch[device-gfx1101]" torchaudio
-  .venv-gpu\Scripts\python.exe -m pip install demucs fastapi "uvicorn[standard]" python-multipart soundfile imageio-ffmpeg
+  .venv-gpu\Scripts\python.exe -m pip install demucs fastapi "uvicorn[standard]" python-multipart soundfile imageio-ffmpeg "yt-dlp[default]"
   ```
   `gfx1101` is the RX 7800 XT / 7700 XT. Use `gfx1100` for a 7900-series card or `gfx1201` for a 9070-series card.
 - NVIDIA cards use the CUDA build instead: `--index-url https://download.pytorch.org/whl/cu128 torch torchaudio`.
@@ -55,5 +69,6 @@ When the server starts, it warms up the GPU (tens of seconds) so the first song 
 
 - `app.py`: web server (FastAPI) and job queue
 - `separator.py`: Demucs separation plus ffmpeg decode/encode
+- `downloader.py`: fetches audio from links via yt-dlp
 - `static/index.html`: UI (upload, progress, multitrack mixer)
 - `jobs/`: uploaded songs and generated stems (delete from the UI or remove the folder)

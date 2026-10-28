@@ -34,6 +34,15 @@
   .drop .small { color: var(--muted); font-size: 13px; }
   .drop.has-file .big { color: var(--accent2); }
 
+  .or { display: flex; align-items: center; gap: 12px; color: var(--muted); font-size: 12.5px; margin: 18px 0 12px; }
+  .or::before, .or::after { content: ""; flex: 1; height: 1px; background: var(--line); }
+  .link-box { display: flex; align-items: center; gap: 10px; background: var(--panel2); border: 1.5px solid var(--line);
+    border-radius: 12px; padding: 0 12px; color: var(--muted); transition: .15s; }
+  .link-box:focus-within, .link-box.has-link { border-color: var(--accent); }
+  .link-box input { flex: 1; min-width: 0; background: none; border: 0; outline: 0; color: var(--text);
+    font: inherit; padding: 12px 0; }
+  .link-box button { background: none; border: 0; color: var(--muted); padding: 4px; }
+  .small { font-size: 13px; }
   .section-label { font-size: 12px; text-transform: uppercase; letter-spacing: .08em; color: var(--muted);
     margin: 22px 0 10px; }
   .modes { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 10px; }
@@ -121,6 +130,13 @@
         <div class="small">MP3, WAV, FLAC, M4A, OGG, or even a video file</div>
         <input type="file" id="fileInput" accept="audio/*,video/*" hidden>
       </div>
+      <div class="or"><span>or paste a link</span></div>
+      <div class="link-box">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 13a5 5 0 0 0 7.5.5l3-3a5 5 0 0 0-7-7l-1.7 1.7"/><path d="M14 11a5 5 0 0 0-7.5-.5l-3 3a5 5 0 0 0 7 7l1.7-1.7"/></svg>
+        <input type="url" id="linkInput" placeholder="https://www.youtube.com/watch?v=..." autocomplete="off" spellcheck="false">
+        <button id="clearLink" class="hidden" title="Clear">✕</button>
+      </div>
+      <div class="small muted" style="margin-top:6px">YouTube, SoundCloud, Bandcamp, Vimeo and 1,000+ other sites. Only the audio is downloaded.</div>
       <div class="section-label">Separation</div>
       <div class="modes" id="modes"></div>
       <div class="row">
@@ -199,32 +215,60 @@ async function initUpload() {
   drop.ondragover = e => { e.preventDefault(); drop.classList.add('over'); };
   drop.ondragleave = () => drop.classList.remove('over');
   drop.ondrop = e => { e.preventDefault(); drop.classList.remove('over'); e.dataTransfer.files[0] && pickFile(e.dataTransfer.files[0]); };
+  const link = $('#linkInput');
+  link.oninput = () => { if (link.value.trim()) clearFile(); syncInputs(); };
+  link.onkeydown = e => { if (e.key === 'Enter' && !$('#splitBtn').disabled) upload(); };
+  $('#clearLink').onclick = () => { link.value = ''; syncInputs(); link.focus(); };
+  // Paste a link anywhere on the upload page to use it.
+  addEventListener('paste', e => {
+    if ($('#uploadView').classList.contains('hidden') || e.target === link) return;
+    const text = (e.clipboardData.getData('text') || '').trim();
+    if (/^https?:\/\/\S+$/.test(text)) { link.value = text; clearFile(); syncInputs(); }
+  });
   $('#splitBtn').onclick = upload;
   $('#newBtn').onclick = () => { location.hash = ''; };
 }
 
+const linkValue = () => $('#linkInput').value.trim();
+const isLink = s => /^https?:\/\/\S+$/.test(s);
+
+function syncInputs() {
+  const l = linkValue();
+  $('#linkInput').closest('.link-box').classList.toggle('has-link', isLink(l));
+  $('#clearLink').classList.toggle('hidden', !l);
+  $('#splitBtn').disabled = !(file || isLink(l));
+}
+
+function clearFile() {
+  file = null; $('#fileInput').value = '';
+  $('#drop').classList.remove('has-file');
+  $('#dropText').textContent = 'Drop a song here or click to browse';
+}
+
 function pickFile(f) {
   file = f;
+  $('#linkInput').value = '';
   $('#drop').classList.add('has-file');
   $('#dropText').textContent = f.name;
-  $('#splitBtn').disabled = false;
+  syncInputs();
 }
 
 async function upload() {
-  if (!file) return;
+  const link = linkValue();
+  if (!file && !isLink(link)) return;
   const btn = $('#splitBtn');
-  btn.disabled = true; btn.textContent = 'Uploading...';
+  btn.disabled = true; btn.textContent = file ? 'Uploading...' : 'Sending...';
   const fd = new FormData();
-  fd.append('file', file); fd.append('mode', mode); fd.append('format', format);
+  fd.append('mode', mode); fd.append('format', format);
+  if (file) fd.append('file', file); else fd.append('url', link);
   try {
-    const res = await fetch('/api/split', { method: 'POST', body: fd });
+    const res = await fetch(file ? '/api/split' : '/api/split_url', { method: 'POST', body: fd });
     if (!res.ok) throw new Error((await res.json()).detail || res.statusText);
     const job = await res.json();
-    file = null; $('#fileInput').value = '';
-    $('#drop').classList.remove('has-file'); $('#dropText').textContent = 'Drop a song here or click to browse';
+    clearFile(); $('#linkInput').value = ''; syncInputs();
     location.hash = 'job=' + job.id;
   } catch (e) {
-    alert('Upload failed: ' + e.message);
+    alert('Could not start: ' + e.message);
     btn.disabled = false;
   } finally {
     btn.textContent = 'Split song';
@@ -249,7 +293,8 @@ async function loadHistory() {
     if (del) {
       e.stopPropagation();
       if (!confirm('Delete this song and its stems?')) return;
-      await fetch('/api/jobs/' + del.dataset.del, { method: 'DELETE' });
+      const res = await fetch('/api/jobs/' + del.dataset.del, { method: 'DELETE' });
+      if (!res.ok) alert('Could not delete: ' + ((await res.json().catch(() => ({}))).detail || res.statusText));
       return loadHistory();
     }
     const item = e.target.closest('.hist-item');
@@ -277,20 +322,31 @@ async function openJob(id) {
 }
 
 /* ---------- mixer ---------- */
+// Two playback engines:
+//  - Web Audio (default): every stem is decoded into memory and started on the
+//    same audio clock, so stems stay sample-accurately in sync with no drift.
+//  - <audio> elements (fallback for very long songs, where decoded audio would
+//    use too much memory): followers are re-synced to the first stem, but only
+//    when drift is clearly audible, because each correction is a small skip.
+const WEB_AUDIO_BUDGET = 1.2e9; // bytes of decoded float32 audio we allow in the tab
+
 const mixer = {
   tracks: [], playing: false, raf: 0, duration: 0, dragging: false,
+  ctx: null, webAudio: false, ready: false, offset: 0, startedAt: 0, loadId: 0, lastSync: 0,
 
   load(job) {
     this.stop();
+    const loadId = ++this.loadId;
     this.job = job;
     this.duration = job.duration;
+    this.offset = 0;
     $('#mTitle').textContent = job.name;
     $('#zipBtn').href = `/api/jobs/${job.id}/zip`;
-    $('#mInfo').textContent = `${(modeList.find(m => m.id === job.mode) || {}).description || ''} · ${job.format.toUpperCase()}`
-      + (job.elapsed ? ` · processed in ${fmtTime(job.elapsed)}` : '');
+    $('#mInfo').innerHTML = esc(`${(modeList.find(m => m.id === job.mode) || {}).description || ''} · ${job.format.toUpperCase()}`
+      + (job.elapsed ? ` · processed in ${fmtTime(job.elapsed)}` : ''))
+      + (job.source && isLink(job.source) ? ` · <a href="${esc(job.source)}" target="_blank" rel="noopener" style="color:var(--accent2)">source</a>` : '');
     const box = $('#stems');
     box.innerHTML = '';
-    let ready = 0;
     this.tracks = job.stems.map(s => {
       const color = COLORS[s.name] || '#9b9bb5';
       const row = document.createElement('div');
@@ -305,12 +361,8 @@ const mixer = {
           <a class="icon-btn" title="Download ${esc(s.name)}" href="/api/jobs/${job.id}/stems/${encodeURIComponent(s.file)}?download=true">${DL}</a>
         </div>`;
       box.appendChild(row);
-      const audio = new Audio(`/api/jobs/${job.id}/stems/${encodeURIComponent(s.file)}`);
-      audio.preload = 'auto';
-      const t = { stem: s, color, row, audio, mute: false, solo: false, volume: 1 };
-      audio.addEventListener('canplaythrough', () => { if (++ready === job.stems.length) $('#playBtn').disabled = false; }, { once: true });
-      audio.addEventListener('loadedmetadata', () => { if (audio.duration && isFinite(audio.duration)) this.duration = audio.duration; }, { once: true });
-      audio.addEventListener('ended', () => { if (t === this.tracks[0]) this.pause(true); });
+      const t = { stem: s, color, row, mute: false, solo: false, volume: 1,
+                  url: `/api/jobs/${job.id}/stems/${encodeURIComponent(s.file)}` };
       row.querySelector('input').oninput = e => { t.volume = +e.target.value; this.applyGains(); };
       row.querySelectorAll('.tog').forEach(b => b.onclick = () => {
         if (b.dataset.t === 'm') t.mute = !t.mute; else t.solo = !t.solo;
@@ -323,10 +375,68 @@ const mixer = {
       return t;
     });
     this.drawWaves();
-    this.applyGains();
     this.update();
-    $('#playBtn').innerHTML = PLAY;
-    $('#playBtn').disabled = true;
+    this.setReady(false);
+
+    const decodedBytes = job.duration * 44100 * 2 * 4 * job.stems.length;
+    this.webAudio = !!window.AudioContext && decodedBytes < WEB_AUDIO_BUDGET;
+    (this.webAudio ? this.loadWebAudio(loadId) : Promise.reject(new Error('too long for Web Audio')))
+      .catch(err => {
+        if (loadId !== this.loadId) return;
+        if (this.webAudio) console.warn('Web Audio unavailable, using <audio> playback:', err);
+        this.webAudio = false;
+        this.loadElements(loadId);
+      });
+  },
+
+  setReady(ready, label) {
+    this.ready = ready;
+    const btn = $('#playBtn');
+    btn.disabled = !ready;
+    btn.innerHTML = this.playing ? PAUSE : PLAY;
+    btn.title = ready ? 'Play / pause (Space)' : (label || 'Loading stems...');
+    $('#time').textContent = ready || !label ? `${fmtTime(this.time)} / ${fmtTime(this.duration)}` : label;
+  },
+
+  async loadWebAudio(loadId) {
+    if (!this.ctx) {
+      try { this.ctx = new AudioContext({ sampleRate: 44100, latencyHint: 'playback' }); }
+      catch { this.ctx = new AudioContext(); }
+    }
+    const ctx = this.ctx;
+    let done = 0;
+    this.setReady(false, `Loading 0/${this.tracks.length}`);
+    await Promise.all(this.tracks.map(async t => {
+      const res = await fetch(t.url);
+      if (!res.ok) throw new Error(`HTTP ${res.status} for ${t.stem.file}`);
+      const data = await res.arrayBuffer();
+      if (loadId !== this.loadId) return;
+      t.buffer = await ctx.decodeAudioData(data);
+      if (loadId !== this.loadId) return;
+      t.gain = ctx.createGain();
+      t.gain.connect(ctx.destination);
+      this.setReady(false, `Loading ${++done}/${this.tracks.length}`);
+    }));
+    if (loadId !== this.loadId) return;
+    this.duration = Math.max(...this.tracks.map(t => t.buffer.duration));
+    this.applyGains();
+    this.setReady(true);
+  },
+
+  loadElements(loadId) {
+    let ready = 0;
+    for (const t of this.tracks) {
+      const audio = t.audio = new Audio(t.url);
+      audio.preload = 'auto';
+      audio.addEventListener('canplaythrough', () => {
+        if (loadId === this.loadId && ++ready === this.tracks.length) this.setReady(true);
+      }, { once: true });
+      audio.addEventListener('loadedmetadata', () => {
+        if (audio.duration && isFinite(audio.duration)) this.duration = audio.duration;
+      }, { once: true });
+      audio.addEventListener('ended', () => { if (t === this.tracks[0]) this.pause(true); });
+    }
+    this.applyGains();
   },
 
   drawWaves() {
@@ -353,28 +463,62 @@ const mixer = {
     const anySolo = this.tracks.some(t => t.solo);
     for (const t of this.tracks) {
       const on = anySolo ? t.solo : !t.mute;
-      t.audio.volume = t.volume;
-      t.audio.muted = !on;
+      if (t.gain) t.gain.gain.setTargetAtTime(on ? t.volume : 0, this.ctx.currentTime, 0.015); // smooth, no clicks
+      if (t.audio) { t.audio.volume = t.volume; t.audio.muted = !on; }
       t.row.classList.toggle('off', !on);
       t.row.querySelector('[data-t=m]').classList.toggle('on-m', t.mute);
       t.row.querySelector('[data-t=s]').classList.toggle('on-s', t.solo);
     }
   },
 
-  get time() { return this.tracks[0] ? this.tracks[0].audio.currentTime : 0; },
+  get time() {
+    if (this.webAudio) {
+      if (!this.playing || !this.ctx) return this.offset;
+      return Math.min(this.duration, this.offset + Math.max(0, this.ctx.currentTime - this.startedAt));
+    }
+    return this.tracks[0]?.audio ? this.tracks[0].audio.currentTime : 0;
+  },
+
+  startSources() {
+    // Schedule every stem to start at the exact same moment on the audio clock.
+    this.startedAt = this.ctx.currentTime + 0.05;
+    for (const t of this.tracks) {
+      const src = t.src = this.ctx.createBufferSource();
+      src.buffer = t.buffer;
+      src.connect(t.gain);
+      src.start(this.startedAt, Math.min(this.offset, t.buffer.duration));
+    }
+  },
+
+  stopSources() {
+    for (const t of this.tracks) {
+      if (t.src) { try { t.src.stop(); } catch {} t.src.disconnect(); t.src = null; }
+    }
+  },
 
   async play() {
-    if (!this.tracks.length) return;
-    const t0 = this.time >= this.duration - 0.05 ? 0 : this.time;
-    for (const t of this.tracks) t.audio.currentTime = t0;
-    await Promise.all(this.tracks.map(t => t.audio.play().catch(() => {})));
+    if (!this.ready || this.playing) return;
+    if (this.webAudio) {
+      if (this.ctx.state === 'suspended') await this.ctx.resume();
+      if (this.offset >= this.duration - 0.05) this.offset = 0;
+      this.startSources();
+    } else {
+      const t0 = this.time >= this.duration - 0.05 ? 0 : this.time;
+      for (const t of this.tracks) t.audio.currentTime = t0;
+      await Promise.all(this.tracks.map(t => t.audio.play().catch(() => {})));
+    }
     this.playing = true;
     $('#playBtn').innerHTML = PAUSE;
     this.loop();
   },
 
   pause(ended) {
-    for (const t of this.tracks) t.audio.pause();
+    if (this.webAudio) {
+      this.offset = this.time;
+      this.stopSources();
+    } else {
+      for (const t of this.tracks) t.audio?.pause();
+    }
     this.playing = false;
     cancelAnimationFrame(this.raf);
     $('#playBtn').innerHTML = PLAY;
@@ -383,22 +527,41 @@ const mixer = {
   },
 
   stop() {
+    this.loadId++;
     this.pause();
-    for (const t of this.tracks) { t.audio.removeAttribute('src'); t.audio.load(); }
+    for (const t of this.tracks) {
+      if (t.audio) { t.audio.removeAttribute('src'); t.audio.load(); }
+      t.gain?.disconnect();
+      t.buffer = null; // free decoded audio
+    }
     this.tracks = [];
+    this.offset = 0;
   },
 
   seek(sec) {
     sec = Math.min(Math.max(0, sec), this.duration);
-    for (const t of this.tracks) t.audio.currentTime = sec;
+    if (this.webAudio) {
+      this.offset = sec;
+      if (this.playing) { this.stopSources(); this.startSources(); }
+    } else {
+      for (const t of this.tracks) if (t.audio) t.audio.currentTime = sec;
+    }
     this.update(sec);
   },
 
   loop() {
-    // keep followers locked to the first track
-    const master = this.tracks[0].audio.currentTime;
-    for (const t of this.tracks.slice(1))
-      if (Math.abs(t.audio.currentTime - master) > 0.06) t.audio.currentTime = master;
+    if (this.webAudio) {
+      if (this.time >= this.duration - 0.01) return this.pause(true);
+    } else {
+      // Fallback engine: only correct clearly audible drift, at most twice a second.
+      const now = performance.now();
+      if (now - this.lastSync > 500) {
+        this.lastSync = now;
+        const master = this.tracks[0].audio.currentTime;
+        for (const t of this.tracks.slice(1))
+          if (Math.abs(t.audio.currentTime - master) > 0.25) t.audio.currentTime = master;
+      }
+    }
     this.update();
     if (this.playing) this.raf = requestAnimationFrame(() => this.loop());
   },
@@ -406,7 +569,7 @@ const mixer = {
   update(at) {
     const cur = at ?? this.time, frac = this.duration ? cur / this.duration : 0;
     if (!this.dragging) $('#seek').value = Math.round(frac * 1000);
-    $('#time').textContent = `${fmtTime(cur)} / ${fmtTime(this.duration)}`;
+    if (this.ready || !this.tracks.length) $('#time').textContent = `${fmtTime(cur)} / ${fmtTime(this.duration)}`;
     for (const t of this.tracks) {
       t.row.querySelector('.played').style.width = frac * 100 + '%';
       t.row.querySelector('.head').style.left = `calc(${frac * 100}% - 1px)`;
@@ -442,7 +605,7 @@ pollInfo();
 function route() {
   const m = location.hash.match(/job=([\w]+)/);
   if (m) openJob(m[1]);
-  else { clearTimeout(pollTimer); show('uploadView'); $('#splitBtn').disabled = !file; loadHistory(); }
+  else { clearTimeout(pollTimer); show('uploadView'); syncInputs(); loadHistory(); }
 }
 addEventListener('hashchange', route);
 initUpload().then(route);
